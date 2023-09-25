@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from .._CUDA import (linear_a8_w8_b32_o32,
                      linear_relu_a8_w8_b8_o8,
                      linear_a8_w8_b8_o8,
@@ -47,6 +48,8 @@ class W8A8B8O8Linear(torch.nn.Module):
         int8_module = W8A8B8O8Linear(
             module.in_features, module.out_features)
         int8_weight, weight_scale = quantize_per_tensor_absmax(module.weight)
+        if module.bias is None:
+            module.bias = nn.Parameter(torch.zeros((1, module.out_features), dtype=torch.float16).to(module.weight.device))
         int8_bias, bias_scale = quantize_per_tensor_absmax(module.bias)
         alpha = input_scale * weight_scale / output_scale
         beta = bias_scale / output_scale
@@ -92,6 +95,8 @@ class W8A8B8O8LinearReLU(torch.nn.Module):
         int8_module = W8A8B8O8LinearReLU(
             module.in_features, module.out_features)
         int8_weight, weight_scale = quantize_per_tensor_absmax(module.weight)
+        if module.bias is None:
+            module.bias = nn.Parameter(torch.zeros((1, module.out_features), dtype=torch.float16).to(module.weight.device))
         int8_bias, bias_scale = quantize_per_tensor_absmax(module.bias)
         alpha = input_scale * weight_scale / output_scale
         beta = bias_scale / output_scale
@@ -163,6 +168,8 @@ class W8A8B32O32Linear(torch.nn.Module):
         int8_module = W8A8B32O32Linear(
             module.in_features, module.out_features)
         int8_weight, weight_scale = quantize_per_tensor_absmax(module.weight)
+        if module.bias is None:
+            module.bias = nn.Parameter(torch.zeros((1, module.out_features), dtype=torch.float16).to(module.weight.device))
         module.bias = module.bias.float()
         bias_scale = module.bias.abs().max() / (2**31 - 1)
         int32_bias = (module.bias / bias_scale).round().to(torch.int32)
@@ -222,6 +229,8 @@ class W8A8BFP32OFP32Linear(torch.nn.Module):
         int8_weight, weight_scale = quantize_per_tensor_absmax(module.weight)
         alpha = input_scale * weight_scale
         int8_module.weight = int8_weight
+        if module.bias is None:
+            module.bias = nn.Parameter(torch.zeros((1, module.out_features), dtype=torch.float16).to(module.weight.device))
         int8_module.bias = module.bias.to(torch.float32)
         int8_module.a = alpha
         int8_module.input_scale = input_scale

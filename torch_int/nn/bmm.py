@@ -17,7 +17,8 @@ class BMM_S8T_S8N_S8T(torch.nn.Module):
     @staticmethod
     def from_scale(a_scale, b_scale, output_scale):
         bmm_module = BMM_S8T_S8N_S8T(1.0)
-        alpha = a_scale * b_scale / output_scale
+        alpha = a_scale * b_scale / (output_scale + 1e-6)
+
         if not torch.is_tensor(alpha):
             alpha = torch.tensor(alpha)
         bmm_module.a = alpha
