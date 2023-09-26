@@ -33,15 +33,16 @@ def test_llama_model():
 
     input_ids = torch.randint(low=0, high=vocab_size, size=(batch_size, sequence_length))
     print('done input_ids')
-    layer = LlamaForCausalLM(config).cuda(0)
+    layer = LlamaForCausalLM(config).cuda()
+    layer.to(torch.float16)
     layer.eval()
     print('done layer')
-    int8_layer = Int8LlamaModel.from_float(layer, 0).cuda(1)
+    int8_layer = Int8LlamaModel.from_float(layer, 0).cuda()
     print('done int8_layer')
     int8_layer.eval()
     # import pdb; pdb.set_trace()
-    _ = int_infer(layer, input_ids.cuda(0))
-    _ = int_infer(int8_layer, input_ids.cuda(1))
+    _ = int_infer(layer, input_ids.cuda())
+    _ = int_infer(int8_layer, input_ids.cuda())
 
 @exec_time
 def int_infer(model, input):
