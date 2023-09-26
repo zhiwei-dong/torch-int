@@ -10,7 +10,12 @@ from transformers.models.llama.modeling_llama import (
     LlamaDecoderLayer,
     LlamaMLP,
     BaseModelOutputWithPast,
-    LlamaRMSNorm
+    LlamaRMSNorm,
+    LlamaRotaryEmbedding,
+    LlamaLinearScalingRotaryEmbedding,
+    LlamaDynamicNTKScalingRotaryEmbedding,
+    apply_rotary_pos_emb,
+    repeat_kv,
 )
 from typing import Optional, Tuple, List
 from torch_int.nn.linear import W8A8BFP32OFP32Linear, W8A8B8O8Linear, W8A8B8O8LinearReLU
@@ -19,6 +24,8 @@ from transformers.utils import logging
 from transformers.activations import ACT2FN
 from torch_int.nn.bmm import BMM_S8T_S8N_S8T, BMM_S8T_S8N_F32T
 logger = logging.get_logger(__name__)
+import math
+import torch.nn.functional as F
 
 
 class Int8LlamaAttention(nn.Module):
@@ -28,6 +35,7 @@ class Int8LlamaAttention(nn.Module):
         self, config: LlamaConfig
     ):
         super().__init__()
+        self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
@@ -80,15 +88,16 @@ class Int8LlamaAttention(nn.Module):
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
-    # @exec_time
     @torch.no_grad()
     def forward(
         self,
         hidden_states: torch.Tensor,
         key_value_states: Optional[torch.Tensor] = None,
+        position_ids = None,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.Tensor] = None,
         layer_head_mask: Optional[torch.Tensor] = None,
+        use_cache: bool = False,
         output_attentions: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
@@ -179,6 +188,7 @@ class Int8LlamaAttention(nn.Module):
         attn_probs = attn_probs.to(torch.int8)
 
         value_states = value_states.transpose(1, 2).contiguous()
+        # import pdb; pdb.set_trace()
         attn_output = self.pv_bmm(attn_probs, value_states)
 
         if attn_output.size() != (bsz * self.num_heads, tgt_len, self.head_dim):
@@ -199,10 +209,10 @@ class Int8LlamaAttention(nn.Module):
 
         return attn_output, attn_probs_reshaped, past_key_value
 
-
 class Int8LlamaMLP(nn.Module):
     def __init__(self, config: LlamaConfig):
         super().__init__()
+        self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
         self.hidden_act = config.hidden_act
@@ -261,37 +271,53 @@ class Int8LlamaDecoderLayer(nn.Module):
             module.mlp, 0, 0, 0, 0)
         return int8_module
 
-    @exec_time
+    # @exec_time
     @torch.no_grad()
     def forward(
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        layer_head_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        # Self Attention
+        """
+        Args:
+            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
+            attention_mask (`torch.FloatTensor`, *optional*): attention mask of size
+                `(batch, 1, tgt_len, src_len)` where padding elements are indicated by very large negative values.
+            output_attentions (`bool`, *optional*):
+                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
+                returned tensors for more detail.
+            use_cache (`bool`, *optional*):
+                If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
+                (see `past_key_values`).
+            past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
+        """
+
         residual = hidden_states
+
         hidden_states = self.input_layernorm(hidden_states)
 
+        # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
             hidden_states=hidden_states,
-            past_key_value=past_key_value,
             attention_mask=attention_mask,
-            layer_head_mask=layer_head_mask,
+            position_ids=position_ids,
+            past_key_value=past_key_value,
             output_attentions=output_attentions,
+            use_cache=use_cache,
         )
+        hidden_states = residual + hidden_states
 
-        residual.add_(hidden_states.to(residual.dtype))
-
-        hidden_states = self.post_attention_layernorm(residual)
-
+        # Fully Connected
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
-        residual.add_(hidden_states.to(residual.dtype))
+        hidden_states = residual + hidden_states
 
-        outputs = (residual,)
+        outputs = (hidden_states,)
 
         if output_attentions:
             outputs += (self_attn_weights,)
@@ -302,7 +328,7 @@ class Int8LlamaDecoderLayer(nn.Module):
         return outputs
 
 
-class Int8LlamaModel(LlamaModel):
+class Int8LlamaModel(LlamaPreTrainedModel):
     def __init__(self, config: LlamaConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
@@ -315,6 +341,10 @@ class Int8LlamaModel(LlamaModel):
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
+    get_input_embeddings = LlamaModel.get_input_embeddings
+    set_input_embeddings = LlamaModel.set_input_embeddings
+    _prepare_decoder_attention_mask = LlamaModel._prepare_decoder_attention_mask
+    forward = LlamaModel.forward
 
     @staticmethod
     def from_float(module, decoder_layer_scales):
@@ -322,7 +352,7 @@ class Int8LlamaModel(LlamaModel):
         return int8_module
 
 
-class Int8LlamaForCausalLM(LlamaForCausalLM):
+class Int8LlamaForCausalLM(LlamaPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
@@ -340,3 +370,13 @@ class Int8LlamaForCausalLM(LlamaForCausalLM):
     def from_float(module, decoder_layer_scales):
         int8_module = Int8LlamaForCausalLM(module.config)
         return int8_module
+
+    get_input_embeddings = LlamaForCausalLM.get_input_embeddings
+    set_input_embeddings = LlamaForCausalLM.set_input_embeddings
+    get_output_embeddings = LlamaForCausalLM.get_output_embeddings
+    set_output_embeddings = LlamaForCausalLM.set_output_embeddings
+    set_decoder = LlamaForCausalLM.set_decoder
+    get_decoder = LlamaForCausalLM.get_decoder
+    forward = LlamaForCausalLM.forward
+    prepare_inputs_for_generation = LlamaForCausalLM.prepare_inputs_for_generation
+    _reorder_cache = LlamaForCausalLM._reorder_cache

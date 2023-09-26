@@ -51,7 +51,7 @@ def test_llama_mlp():
 
     # ic(y_hat)
     r2 = (y - y_hat).pow(2).mean() / y.pow(2).mean()
-    # import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
     # ic(r2)
     print(r2)
 
