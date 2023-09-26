@@ -277,9 +277,10 @@ class Int8LlamaDecoderLayer(nn.Module):
         self.embed_dim = config.hidden_size
         self.self_attn = Int8LlamaAttention(config)
         self.mlp = Int8LlamaMLP(config)
+        # ln_output_int8 = ln_output_fp.round().clamp(-128, 127).to(torch.int8)
 
-        self.input_layernorm = LayerNormQ(self.embed_dim)
-        self.post_attention_layernorm = LayerNormQ(self.embed_dim)
+        self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     @staticmethod
     def from_float(module: LlamaDecoderLayer,
@@ -323,7 +324,7 @@ class Int8LlamaDecoderLayer(nn.Module):
 
         residual = hidden_states
 
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.input_layernorm(hidden_states).round().clamp(-128, 127).to(torch.int8)
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -338,7 +339,7 @@ class Int8LlamaDecoderLayer(nn.Module):
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.post_attention_layernorm(hidden_states).round().clamp(-128, 127).to(torch.int8)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
