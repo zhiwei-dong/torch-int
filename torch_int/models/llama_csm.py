@@ -183,9 +183,9 @@ class Int8LlamaDecoderLayer(nn.Module):
         split_fc(self.input_layernorm_csm.num_split, [self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj])
         merge_fc(self.input_layernorm_csm.src_idx, self.input_layernorm_csm.dst_idx, [self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj])
         # print("Test")
-        self.self_attn.q_proj.weight.contiguous()
-        self.self_attn.k_proj.weight.contiguous()
-        self.self_attn.v_proj.weight.contiguous()
+        # self.self_attn.q_proj.weight.contiguous()
+        # self.self_attn.k_proj.weight.contiguous()
+        # self.self_attn.v_proj.weight.contiguous()
 
         # post_attention_layernorm_csm
         del self.post_attention_layernorm_csm.outlier_channel_idx
@@ -208,8 +208,8 @@ class Int8LlamaDecoderLayer(nn.Module):
 
         split_fc(self.post_attention_layernorm_csm.num_split, [self.mlp.gate_proj, self.mlp.up_proj])
         merge_fc(self.post_attention_layernorm_csm.src_idx, self.post_attention_layernorm_csm.dst_idx, [self.mlp.gate_proj, self.mlp.up_proj])
-        self.mlp.gate_proj.weight.contiguous()
-        self.mlp.up_proj.weight.contiguous()
+        # self.mlp.gate_proj.weight.contiguous()
+        # self.mlp.up_proj.weight.contiguous()
         # print("Test")
 
     @staticmethod
@@ -256,6 +256,7 @@ class Int8LlamaDecoderLayer(nn.Module):
 
         hidden_states = self.input_layernorm(hidden_states)
         hidden_states = self.input_layernorm_csm(hidden_states).round().clamp(-128, 127).to(torch.int8)
+        # hidden_states = hidden_states.contiguous()
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -272,6 +273,7 @@ class Int8LlamaDecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.post_attention_layernorm_csm(hidden_states).round().clamp(-128, 127).to(torch.int8)
+        # hidden_states = hidden_states.contiguous()
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
