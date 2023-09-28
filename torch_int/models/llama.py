@@ -242,8 +242,8 @@ class Int8LlamaMLP(nn.Module):
         self.intermediate_size = config.intermediate_size
         self.hidden_act = config.hidden_act
 
-        self.gate_proj = W8A8B8O8LinearReLU(self.hidden_size, self.intermediate_size)
-        self.up_proj = W8A8B8O8Linear(self.hidden_size, self.intermediate_size)
+        self.gate_proj = W8A8BFP32OFP32Linear(self.hidden_size, self.intermediate_size)
+        self.up_proj = W8A8BFP32OFP32Linear(self.hidden_size, self.intermediate_size)
         self.down_proj = W8A8BFP32OFP32Linear(self.intermediate_size, self.hidden_size)
         self.act_fn = ACT2FN[self.hidden_act]
 
@@ -257,9 +257,9 @@ class Int8LlamaMLP(nn.Module):
         int8_module = Int8LlamaMLP(
             module.config
         )
-        int8_module.gate_proj = W8A8B8O8LinearReLU.from_float(
+        int8_module.gate_proj = W8A8BFP32OFP32Linear.from_float(
             module.gate_proj, input_scale, gate_out_scale)
-        int8_module.up_proj = W8A8B8O8Linear.from_float(
+        int8_module.up_proj = W8A8BFP32OFP32Linear.from_float(
             module.up_proj, input_scale, up_out_scale)
         int8_module.down_proj = W8A8BFP32OFP32Linear.from_float(
             module.down_proj, down_in_scale)
@@ -267,8 +267,11 @@ class Int8LlamaMLP(nn.Module):
 
     # @exec_time
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        # return self.down_proj(self.act_fn(self.gate_proj(hidden_states)) * self.up_proj(hidden_states))
-        return self.down_proj(self.gate_proj(hidden_states) * self.up_proj(hidden_states))
+        x1 = self.act_fn(self.gate_proj(hidden_states))
+        x2 = self.up_proj(hidden_states)
+        x = x1 * x2
+        return self.down_proj(x.round().clamp(-128, 127).to(torch.int8))
+        # return self.down_proj(self.gate_proj(hidden_states) * self.up_proj(hidden_states))
 
 
 class Int8LlamaDecoderLayer(nn.Module):
