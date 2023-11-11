@@ -25,8 +25,10 @@ class W8A8B8O8Linear(torch.nn.Module):
                                                                  self.in_features), dtype=torch.int8, requires_grad=False))
         self.register_buffer('bias', torch.zeros(
             (1, self.out_features), dtype=torch.int8, requires_grad=False))
-        self.register_buffer('a', torch.tensor(alpha))
-        self.register_buffer('b', torch.tensor(beta))
+        # self.register_buffer('a', torch.tensor(alpha))
+        # self.register_buffer('b', torch.tensor(beta))
+        self.a = alpha
+        self.b = beta
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
@@ -39,7 +41,7 @@ class W8A8B8O8Linear(torch.nn.Module):
         x_shape = x.shape
         x = x.view(-1, x_shape[-1])
         y = linear_a8_w8_b8_o8(x, self.weight, self.bias,
-                               self.a.item(), self.b.item())
+                               self.a, self.b)
         y = y.view(*x_shape[:-1], -1)
         return y
 
@@ -71,8 +73,10 @@ class W8A8B8O8LinearReLU(torch.nn.Module):
                                                                  self.in_features), dtype=torch.int8, requires_grad=False))
         self.register_buffer('bias', torch.zeros(
             (1, self.out_features), dtype=torch.int8, requires_grad=False))
-        self.register_buffer('a', torch.tensor(alpha))
-        self.register_buffer('b', torch.tensor(beta))
+        # self.register_buffer('a', torch.tensor(alpha))
+        # self.register_buffer('b', torch.tensor(beta))
+        self.a = alpha
+        self.b = beta
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
@@ -85,7 +89,7 @@ class W8A8B8O8LinearReLU(torch.nn.Module):
         x_shape = x.shape
         x = x.view(-1, x_shape[-1])
         y = linear_relu_a8_w8_b8_o8(x, self.weight, self.bias,
-                                    self.a.item(), self.b.item())
+                                    self.a, self.b)
         y = y.view(*x_shape[:-1], -1)
         return y
 
@@ -145,8 +149,10 @@ class W8A8B32O32Linear(torch.nn.Module):
                                                                  self.in_features), dtype=torch.int8, requires_grad=False))
         self.register_buffer('bias', torch.zeros(
             (1, self.out_features), dtype=torch.int32, requires_grad=False))
-        self.register_buffer('a', torch.tensor(alpha))
-        self.register_buffer('b', torch.tensor(beta))
+        # self.register_buffer('a', torch.tensor(alpha))
+        # self.register_buffer('b', torch.tensor(beta))
+        self.a = alpha
+        self.b = beta
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
@@ -159,7 +165,7 @@ class W8A8B32O32Linear(torch.nn.Module):
         x_shape = x.shape
         x = x.view(-1, x_shape[-1])
         y = linear_a8_w8_b32_o32_with_scaling(
-            x, self.weight, self.bias, self.a.item(), self.b.item())
+            x, self.weight, self.bias, self.a, self.b)
         y = y.view(*x_shape[:-1], -1)
         return y
 
@@ -197,7 +203,8 @@ class W8A8BFP32OFP32Linear(torch.nn.Module):
                                                                  self.in_features), dtype=torch.int8, requires_grad=False))
         self.register_buffer('bias', torch.zeros(
             (1, self.out_features), dtype=torch.float32, requires_grad=False))
-        self.register_buffer('a', torch.tensor(alpha))
+        # self.register_buffer('a', torch.tensor(alpha))
+        self.a = alpha
 
     def _apply(self, fn):
         # prevent the bias from being converted to half
@@ -218,7 +225,7 @@ class W8A8BFP32OFP32Linear(torch.nn.Module):
         x = x.view(-1, x_shape[-1])
         self.bias = self.bias.to(torch.float32)
         y = linear_a8_w8_bfp32_ofp32(
-            x, self.weight, self.bias, self.a.item(), 1)
+            x, self.weight, self.bias, self.a, 1)
         y = y.view(*x_shape[:-1], -1)
         return y
 

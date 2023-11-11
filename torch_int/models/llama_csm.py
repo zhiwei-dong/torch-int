@@ -66,6 +66,26 @@ def merge_fc(src_idx, dst_idx, fcs):
             fc.in_features = (channel_mask != 0).sum()
 
 
+def num_split_to_index(num_split):
+    # Create a tensor cumulative_indices with the total number of elements required
+    cumulative_indices = torch.zeros(num_split.sum().int(), dtype=torch.int32, device=num_split.device)
+
+    # The first index is always 0
+    cumulative_indices[0] = 0
+
+    # Calculate the start indices for each new value
+    cumulative_sums = num_split.cumsum(0)
+    start_indices = torch.zeros_like(num_split)
+    start_indices[1:] = cumulative_sums[:-1]  # Set the start index for each group
+
+    # Scatter the start_indices into the cumulative_indices tensor
+    cumulative_indices.scatter_(0, start_indices.long(), 1)
+
+    # The cumulative sum of cumulative_indices now gives us the indices we want
+    index_tensor = cumulative_indices.cumsum(0) - 1
+    return index_tensor
+
+
 class Int8LlamaMLP(nn.Module):
     def __init__(self, config: LlamaConfig):
         super().__init__()
@@ -160,6 +180,7 @@ class Int8LlamaDecoderLayer(nn.Module):
         num_split[0] = self.num_channels
         scaling_factors = torch.ones(config.hidden_size + self.num_channels - 1)
         scaling_factors[0] = 1 / self.num_channels
+        index = num_split_to_index(num_split)
         
         # input_layernorm_csm
         del self.input_layernorm_csm.outlier_channel_idx
@@ -168,6 +189,7 @@ class Int8LlamaDecoderLayer(nn.Module):
         self.input_layernorm_csm.register_buffer("outlier_channel_idx", outlier_channel_idx)
         self.input_layernorm_csm.register_buffer("num_split", num_split)
         self.input_layernorm_csm.register_buffer("scaling_factors", scaling_factors)
+        self.input_layernorm_csm.register_buffer("index", index)
         self.input_layernorm_csm.num_additional_channels = self.num_channels - 1
         self.input_layernorm_csm.num_merged_channels = self.num_channels - 1
 
@@ -194,6 +216,7 @@ class Int8LlamaDecoderLayer(nn.Module):
         self.post_attention_layernorm_csm.register_buffer("outlier_channel_idx", outlier_channel_idx)
         self.post_attention_layernorm_csm.register_buffer("num_split", num_split)
         self.post_attention_layernorm_csm.register_buffer("scaling_factors", scaling_factors)
+        self.post_attention_layernorm_csm.register_buffer("index", index)
         self.post_attention_layernorm_csm.num_additional_channels = self.num_channels - 1
         self.post_attention_layernorm_csm.num_merged_channels = self.num_channels - 1
 

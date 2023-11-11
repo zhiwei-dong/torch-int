@@ -28,7 +28,7 @@ def test_llama_model():
     config = LlamaConfig.from_dict(config_dict)
 
     batch_size = 1
-    sequence_length = 512
+    sequence_length = 128
     vocab_size = 32000
 
     input_ids = torch.randint(low=0, high=vocab_size, size=(batch_size, sequence_length))
@@ -47,7 +47,17 @@ def test_llama_model():
     int8_layer = Int8LlamaModel.from_float(layer, 0).cuda()
     print('done load int8_layer')
     int8_layer.eval()
+    # with torch.no_grad():
+        # for _ in range(30):
+            # int8_layer(input_ids)
     _ = int_infer_30(int8_layer, input_ids)
+
+    from torch.profiler import profile, record_function, ProfilerActivity
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, use_cuda=True) as prof:
+            with record_function("model_inference"):
+                int8_layer(input_ids)
+    print(prof.key_averages().table(sort_by="cuda_time_total"))
+    # prof.export_chrome_trace("trace.json")
 
 @exec_time
 def int_infer_30(model, input):

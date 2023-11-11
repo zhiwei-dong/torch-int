@@ -520,7 +520,8 @@ class CSMModule(nn.Module):
                 x = x.unsqueeze(0)
             B, N, C = x.shape
             x = x.view(B * N, C)
-            x = torch.repeat_interleave(x, self.num_split.int(), dim=1)
+            # x = torch.repeat_interleave(x, self.num_split.int(), dim=1)
+            x = torch.index_select(x, dim=1, index=self.index)
             x = x * self.scaling_factors.unsqueeze(0)
             C = x.shape[1]
             x = x.view(B, N, C)
